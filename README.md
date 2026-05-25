@@ -274,7 +274,7 @@ Install:
 Clone the repository:
 
 ```bash id="ewnm22"
-git clone <your-repository-url>
+git clone https://github.com/a7mdmo74/realtime-chat
 cd realtime-chat-platform
 ```
 
