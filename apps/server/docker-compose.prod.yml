@@ -1,0 +1,42 @@
+# ============================================================================
+# docker-compose.prod.yml
+# Production overrides — used with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ============================================================================
+
+version: '3.9'
+
+services:
+  api:
+    build:
+      target: production   # Use the lean production stage
+    restart: always
+    command: node dist/main
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+    # Remove source volume mounts in production
+    volumes:
+      - uploads_data:/app/uploads
+    deploy:
+      replicas: 2           # Run 2 instances behind load balancer
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  postgres:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  redis:
+    restart: always
+
+  # No pgadmin or redis-commander in production

@@ -1,0 +1,24 @@
+# ============================================================================
+# .dockerignore
+# Excludes files from the Docker build context.
+# Smaller context = faster builds = less data sent to Docker daemon.
+# ============================================================================
+
+node_modules
+dist
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.md
+coverage
+test
+.eslintrc*
+.prettierrc*
+docker-compose*.yml
+Dockerfile*
+uploads
+logs
+*.log
+.DS_Store

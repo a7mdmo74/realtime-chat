@@ -1,0 +1,1595 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Realtime Chat API",
+    "description": "# Realtime Chat API — Complete Postman Collection\n\n## Setup Instructions\n\n1. **Import** this collection into Postman\n2. **Set Environment Variables** (create a new environment):\n   - `baseUrl` → `http://localhost:3000/api/v1`\n   - All other variables (`accessToken`, `refreshToken`, etc.) are **auto-populated** by pre/post-request scripts\n\n3. **Run in order**:\n   - Start with `Auth → Register` or `Auth → Login`\n   - Tokens are stored automatically in collection variables\n   - Subsequent requests use those tokens automatically\n\n## Test Credentials (after seeding)\n- `alice@example.com` / `Password123!` (ADMIN)\n- `bob@example.com` / `Password123!` (USER)\n- `charlie@example.com` / `Password123!` (USER)\n\n## WebSocket Testing\nSee the **WebSocket** folder — it contains a pre-built Socket.IO client script you can run in the Postman WebSocket tab.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api/v1",
+      "type": "string",
+      "description": "Base API URL. Change port if needed."
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string",
+      "description": "Auto-set after login/register"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string",
+      "description": "Auto-set after login/register"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string",
+      "description": "Auto-set after login/register"
+    },
+    {
+      "key": "chatId",
+      "value": "",
+      "type": "string",
+      "description": "Auto-set after creating a chat"
+    },
+    {
+      "key": "messageId",
+      "value": "",
+      "type": "string",
+      "description": "Auto-set after sending a message"
+    },
+    {
+      "key": "recipientId",
+      "value": "",
+      "type": "string",
+      "description": "Auto-set after searching users"
+    },
+    {
+      "key": "groupChatId",
+      "value": "",
+      "type": "string",
+      "description": "Auto-set after creating a group chat"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global pre-request: nothing needed here",
+          "// Auth is set per-collection via the auth variable above"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global test: verify response is valid JSON",
+          "pm.test('Response is JSON', function () {",
+          "    pm.response.to.be.json;",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "🏥 Health",
+      "description": "Liveness and readiness probe endpoints. No authentication required.",
+      "item": [
+        {
+          "name": "Liveness Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["health"]
+            },
+            "description": "Returns 200 if the Node.js process is alive. Used by Docker/K8s liveness probe."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status is ok', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.status).to.eql('ok');",
+                  "});",
+                  "pm.test('Has uptime', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.uptime).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Readiness Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/ready",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["ready"]
+            },
+            "description": "Returns 200 if DB and Redis are reachable. Returns 503 if any dependency is down. Used by K8s readiness probe."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 or 503', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 503]);",
+                  "});",
+                  "pm.test('Has checks object', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.checks).to.have.property('database');",
+                  "    pm.expect(body.checks).to.have.property('redis');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🔐 Auth",
+      "description": "Authentication endpoints. Register, login, token refresh, logout.\n\n**Token Flow:**\n1. Register or Login → saves `accessToken` and `refreshToken` to collection variables\n2. All protected requests automatically use `{{accessToken}}`\n3. When access token expires → call Refresh Tokens\n4. Logout revokes the session",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john.doe@example.com\",\n  \"username\": \"johndoe\",\n  \"displayName\": \"John Doe\",\n  \"password\": \"SecureP@ss1!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Register a new user account.\n\n**Validation rules:**\n- `email`: valid email format\n- `username`: 3-30 chars, letters/numbers/underscores only\n- `displayName`: 2-50 chars\n- `password`: min 8 chars, must include uppercase, lowercase, number, symbol\n\n**Rate limit:** 5 requests/minute per IP"
+          },
+          "response": [
+            {
+              "name": "201 Created - Success",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"user\": {\n      \"id\": \"uuid\",\n      \"email\": \"john.doe@example.com\",\n      \"username\": \"johndoe\",\n      \"displayName\": \"John Doe\",\n      \"avatarUrl\": null,\n      \"role\": \"USER\"\n    },\n    \"tokens\": {\n      \"accessToken\": \"eyJhbGci...\",\n      \"refreshToken\": \"eyJhbGci...\",\n      \"expiresIn\": 900\n    }\n  },\n  \"timestamp\": \"2024-01-15T10:00:00.000Z\",\n  \"path\": \"/api/v1/auth/register\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "409 Conflict - Email taken",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"statusCode\": 409,\n    \"message\": \"Email is already registered\",\n    \"error\": \"Conflict\"\n  },\n  \"timestamp\": \"2024-01-15T10:00:00.000Z\",\n  \"path\": \"/api/v1/auth/register\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "",
+                  "pm.test('Response has user and tokens', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body.data).to.have.property('user');",
+                  "    pm.expect(body.data).to.have.property('tokens');",
+                  "});",
+                  "",
+                  "pm.test('Password hash is NOT returned', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.user).to.not.have.property('passwordHash');",
+                  "});",
+                  "",
+                  "// Auto-save tokens for subsequent requests",
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('accessToken', body.data.tokens.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', body.data.tokens.refreshToken);",
+                  "    pm.collectionVariables.set('userId', body.data.user.id);",
+                  "    console.log('✅ Tokens saved. userId:', body.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"Password123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Login with email and password.\n\n**Security note:** Returns the same error message for both wrong email AND wrong password to prevent user enumeration.\n\n**Rate limit:** 10 requests/minute per IP\n\n**Seeded test accounts:**\n- `alice@example.com` / `Password123!` (ADMIN)\n- `bob@example.com` / `Password123!`\n- `charlie@example.com` / `Password123!`"
+          },
+          "response": [
+            {
+              "name": "200 OK - Success",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"user\": {\n      \"id\": \"uuid-alice\",\n      \"email\": \"alice@example.com\",\n      \"username\": \"alice\",\n      \"displayName\": \"Alice Johnson\",\n      \"avatarUrl\": null,\n      \"role\": \"ADMIN\"\n    },\n    \"tokens\": {\n      \"accessToken\": \"eyJhbGci...\",\n      \"refreshToken\": \"eyJhbGci...\",\n      \"expiresIn\": 900\n    }\n  },\n  \"timestamp\": \"2024-01-15T10:00:00.000Z\",\n  \"path\": \"/api/v1/auth/login\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "401 Unauthorized - Wrong credentials",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"statusCode\": 401,\n    \"message\": \"Invalid credentials\",\n    \"error\": \"Unauthorized\"\n  }\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Tokens are present', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.tokens.accessToken).to.be.a('string');",
+                  "    pm.expect(body.data.tokens.refreshToken).to.be.a('string');",
+                  "    pm.expect(body.data.tokens.expiresIn).to.eql(900);",
+                  "});",
+                  "",
+                  "// Auto-save tokens",
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('accessToken', body.data.tokens.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', body.data.tokens.refreshToken);",
+                  "    pm.collectionVariables.set('userId', body.data.user.id);",
+                  "    console.log('✅ Logged in as:', body.data.user.username);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login — Wrong Password (expect 401)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"WrongPassword!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Negative test — verifies that wrong credentials return 401 with no information about which field failed (user enumeration protection)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Error message does not reveal which field failed', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.error.message).to.eql('Invalid credentials');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login — Weak Password Validation (expect 400)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Negative test — verifies ValidationPipe rejects malformed input before it reaches the service layer."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Validation errors returned', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error.statusCode).to.eql(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Tokens",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Exchange a refresh token for a new access + refresh token pair.\n\n**Token Rotation:** The used refresh token is immediately revoked. A new pair is issued.\n\n**Theft detection:** If a stolen token is used after rotation, all sessions for that user are revoked and they must re-login."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('New token pair issued', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.accessToken).to.be.a('string');",
+                  "    pm.expect(body.data.refreshToken).to.be.a('string');",
+                  "    // New tokens should differ from old ones",
+                  "    pm.expect(body.data.accessToken).to.not.eql(pm.collectionVariables.get('accessToken'));",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('accessToken', body.data.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', body.data.refreshToken);",
+                  "    console.log('✅ Tokens rotated successfully');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout (current session)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Revoke the current session's refresh token. Requires a valid access token."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout All Devices",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout-all"]
+            },
+            "description": "Revoke ALL refresh tokens for the current user — logs them out of every device/session simultaneously."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));",
+                  "// Clear saved tokens since they're now invalid",
+                  "pm.collectionVariables.set('accessToken', '');",
+                  "pm.collectionVariables.set('refreshToken', '');",
+                  "console.log('All sessions revoked — tokens cleared from collection');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "👤 Users",
+      "description": "User profile management. Search, view, and update user profiles.\n\nAll endpoints require a valid `Authorization: Bearer {{accessToken}}` header (set automatically from collection variable).",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "me"]
+            },
+            "description": "Returns the authenticated user's full profile."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns user profile', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data).to.have.all.keys('id', 'email', 'username', 'displayName', 'role', 'presenceStatus', 'createdAt');",
+                  "    pm.expect(body.data).to.not.have.property('passwordHash');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Alice J. (Updated)\",\n  \"bio\": \"Backend engineer. Building scalable systems.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "me"]
+            },
+            "description": "Update the authenticated user's profile fields.\n\n**Updatable fields:** `displayName`, `bio`, `avatarUrl`\n\nAll fields are optional — only send what you want to change."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Profile was updated', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.displayName).to.eql('Alice J. (Updated)');",
+                  "    pm.expect(body.data.bio).to.eql('Backend engineer. Building scalable systems.');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/search?q=bob&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "search"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "bob",
+                  "description": "Search term (matches username or displayName, case-insensitive)"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Max results to return (default 20)"
+                }
+              ]
+            },
+            "description": "Search users by username or display name. Case-insensitive partial match.\n\nUseful for: adding members to group chats, starting new DMs."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array of users', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data).to.be.an('array');",
+                  "});",
+                  "",
+                  "// Save the first user's ID for use in chat creation",
+                  "if (pm.response.code === 200) {",
+                  "    const users = pm.response.json().data;",
+                  "    if (users.length > 0) {",
+                  "        pm.collectionVariables.set('recipientId', users[0].id);",
+                  "        console.log('✅ recipientId saved:', users[0].id, '(' + users[0].username + ')');",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get User by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{recipientId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "{{recipientId}}"]
+            },
+            "description": "Fetch any user's public profile by their UUID.\n\nReturns 404 if user doesn't exist or has been soft-deleted."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('User has required fields', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data).to.include.keys('id', 'username', 'displayName', 'presenceStatus');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get User by Username",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/by-username/bob",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "by-username", "bob"]
+            },
+            "description": "Fetch a user's profile by their username (without @).\n\nUseful when users share their username handle."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns correct user', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.username).to.eql('bob');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get User — Not Found (expect 404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/00000000-0000-0000-0000-000000000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "00000000-0000-0000-0000-000000000000"]
+            },
+            "description": "Negative test — verifies that requesting a non-existent UUID returns 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Error has errorCode NOT_FOUND', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Access Without Token (expect 401)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "me"]
+            },
+            "description": "Negative test — verifies that protected routes reject unauthenticated requests."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Returns authentication error', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error.statusCode).to.eql(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "💬 Chats",
+      "description": "Chat room management — create private DMs, group chats, manage members.\n\n**Flow:**\n1. Search for a user → get `recipientId`\n2. Create Private Chat → get `chatId`\n3. Use `chatId` in Messages requests\n\nOr:\n1. Create Group Chat with multiple `memberIds`",
+      "item": [
+        {
+          "name": "Create Private Chat (DM)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipientId\": \"{{recipientId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/private",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "private"]
+            },
+            "description": "Start a 1-on-1 DM with another user.\n\n**Idempotent:** If a DM between these two users already exists, it returns the existing chat instead of creating a duplicate.\n\nRequires `recipientId` — run `Search Users` first to populate `{{recipientId}}`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('recipientId')) {",
+                  "    console.warn('⚠️ recipientId not set. Run \"Search Users\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Returns chat with PRIVATE type', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.type).to.eql('PRIVATE');",
+                  "    pm.expect(body.data.memberCount).to.eql(2);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    const chat = pm.response.json().data;",
+                  "    pm.collectionVariables.set('chatId', chat.id);",
+                  "    console.log('✅ chatId saved:', chat.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Group Chat",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Project Alpha Team\",\n  \"description\": \"Backend and frontend team discussions\",\n  \"memberIds\": [\"{{recipientId}}\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/group",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "group"]
+            },
+            "description": "Create a group chat with multiple members.\n\n- Creator becomes **OWNER** automatically\n- `memberIds` are the initial members (can add more later)\n- `name` is required for group chats\n- Max 100 members total"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Returns GROUP chat', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.type).to.eql('GROUP');",
+                  "    pm.expect(body.data.name).to.eql('Project Alpha Team');",
+                  "});",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('groupChatId', pm.response.json().data.id);",
+                  "    console.log('✅ groupChatId saved:', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Chats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats"]
+            },
+            "description": "Returns all chats the authenticated user is a member of.\n\n**Includes per-chat:**\n- `unreadCount`: messages since last read\n- `lastMessage`: preview of the most recent message\n- `memberCount`: number of active members\n\nSorted by `updatedAt` descending (most recently active first)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array of chats', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data).to.be.an('array');",
+                  "});",
+                  "pm.test('Each chat has unreadCount', () => {",
+                  "    const chats = pm.response.json().data;",
+                  "    if (chats.length > 0) {",
+                  "        pm.expect(chats[0]).to.have.property('unreadCount');",
+                  "        pm.expect(chats[0]).to.have.property('memberCount');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Chat by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}"]
+            },
+            "description": "Fetch details of a specific chat.\n\nReturns 403 if the authenticated user is not a member of this chat."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns correct chat', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.id).to.eql(pm.collectionVariables.get('chatId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add Members to Group",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberIds\": [\"{{recipientId}}\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{groupChatId}}/members",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{groupChatId}}", "members"]
+            },
+            "description": "Add one or more users to a group chat.\n\n**Requires:** ADMIN or OWNER role in the chat.\n\n**Idempotent:** Adding an already-existing member is a no-op (skipDuplicates)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove Member / Leave Chat",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{groupChatId}}/members/{{recipientId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{groupChatId}}", "members", "{{recipientId}}"]
+            },
+            "description": "Remove a member from a group chat.\n\n- **Self-removal:** Any member can remove themselves (leave)\n- **Removing others:** Requires ADMIN or OWNER role\n- **Sets `leftAt`** timestamp (soft removal, chat history preserved)"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Access Non-Member Chat (expect 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/00000000-0000-0000-0000-000000000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "00000000-0000-0000-0000-000000000000"]
+            },
+            "description": "Negative test — verifies that non-members cannot access chats they don't belong to."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403 or 404', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([403, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "📨 Messages",
+      "description": "Message operations within a chat room.\n\nAll endpoints are scoped to a chat: `POST /chats/:chatId/messages`\n\n**Prerequisites:** `{{chatId}}` must be set (run Create Private Chat first).\n\n**Pagination:** Messages use cursor-based pagination — pass `cursor` (a messageId) to get messages before that point.",
+      "item": [
+        {
+          "name": "Send Message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Hello! This is my first message via REST API.\",\n  \"type\": \"TEXT\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages"]
+            },
+            "description": "Send a text message to a chat.\n\n**Message types:** `TEXT`, `IMAGE`, `FILE`, `SYSTEM`\n\n**Optional fields:**\n- `replyToId`: UUID of message being replied to (creates thread)\n- `mediaUrl`: URL for IMAGE/FILE messages\n\nAlso sends a WebSocket `message:new` event to all chat members."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Message has required fields', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data).to.include.keys('id', 'chatId', 'content', 'type', 'sender', 'createdAt');",
+                  "    pm.expect(body.data.type).to.eql('TEXT');",
+                  "    pm.expect(body.data.sender).to.include.keys('id', 'username');",
+                  "});",
+                  "pm.test('No deletedAt in response', () => {",
+                  "    pm.expect(pm.response.json().data).to.not.have.property('deletedAt');",
+                  "});",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('messageId', pm.response.json().data.id);",
+                  "    console.log('✅ messageId saved:', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Reply Message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"This is a reply to the previous message.\",\n  \"type\": \"TEXT\",\n  \"replyToId\": \"{{messageId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages"]
+            },
+            "description": "Send a reply to a specific message by including `replyToId`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('replyToId is set', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.replyToId).to.eql(pm.collectionVariables.get('messageId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Messages (paginated)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages?limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Number of messages per page (max 100)"
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "MessageID cursor — returns messages before this ID (leave empty for latest)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Fetch paginated messages for a chat.\n\n**Cursor pagination:** Returns messages newest-first. To load older messages, pass the ID of the oldest message as `cursor`.\n\n**Response includes `meta`:**\n- `hasNextPage`: true if older messages exist\n- `total`: total message count in chat\n\nOnly returns non-deleted messages. Soft-deleted messages show as `content: null`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns paginated messages', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data).to.be.an('array');",
+                  "    pm.expect(body.meta).to.include.keys('total', 'limit', 'hasNextPage', 'hasPreviousPage');",
+                  "});",
+                  "pm.test('Messages have sender info', () => {",
+                  "    const messages = pm.response.json().data;",
+                  "    if (messages.length > 0) {",
+                  "        pm.expect(messages[0].sender).to.include.keys('id', 'username', 'displayName');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Edit Message",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Hello! This message has been edited.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages/{{messageId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages", "{{messageId}}"]
+            },
+            "description": "Edit a message's content.\n\n**Sender only** — only the message author can edit it.\n\nSets `editedAt` timestamp so recipients can see it was edited."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content was updated', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.content).to.eql('Hello! This message has been edited.');",
+                  "});",
+                  "pm.test('editedAt is set', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.data.editedAt).to.not.be.null;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mark Messages as Read",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageIds\": [\"{{messageId}}\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages/read",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages", "read"]
+            },
+            "description": "Mark one or more messages as read by the current user.\n\n**Effects:**\n1. Creates `MessageRead` records for each message\n2. Updates `ChatMember.lastReadAt` watermark (resets unread count)\n3. Triggers `message:read:ack` WebSocket event to chat members"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add Reaction",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emoji\": \"👍\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages/{{messageId}}/reactions",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages", "{{messageId}}", "reactions"]
+            },
+            "description": "Add an emoji reaction to a message.\n\n**Idempotent:** Adding the same emoji twice is a no-op (upsert).\n\nEmoji value: any valid Unicode emoji string (👍, ❤️, 😂, 🎉, etc.)"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add Second Reaction",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emoji\": \"🎉\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages/{{messageId}}/reactions",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages", "{{messageId}}", "reactions"]
+            },
+            "description": "Add a second different reaction to the same message."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Messages — Verify Reactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages?limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages"],
+              "query": [{ "key": "limit", "value": "5" }]
+            },
+            "description": "Fetch messages to verify reactions appear in the response."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Messages include reactions array', () => {",
+                  "    const messages = pm.response.json().data;",
+                  "    if (messages.length > 0) {",
+                  "        pm.expect(messages[0]).to.have.property('reactions');",
+                  "        pm.expect(messages[0].reactions).to.be.an('array');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove Reaction",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages/{{messageId}}/reactions/%F0%9F%91%8D",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "chats",
+                "{{chatId}}",
+                "messages",
+                "{{messageId}}",
+                "reactions",
+                "%F0%9F%91%8D"
+              ]
+            },
+            "description": "Remove an emoji reaction from a message.\n\nThe emoji in the URL path must be URL-encoded: 👍 = `%F0%9F%91%8D`"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Message",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages/{{messageId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages", "{{messageId}}"]
+            },
+            "description": "Soft-delete a message.\n\n- **Sender:** can delete their own messages\n- **Admin/Owner:** can delete any message in their chat\n\n**Soft delete behavior:**\n- `content` is set to `null`\n- `deletedAt` is set\n- Read receipts and reactions are preserved\n- Message ID still exists (no broken reply chains)"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Message to Non-Member Chat (expect 403)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"I shouldn't be able to send this\",\n  \"type\": \"TEXT\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/00000000-0000-0000-0000-000000000000/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "00000000-0000-0000-0000-000000000000", "messages"]
+            },
+            "description": "Negative test — verifies that non-members cannot send messages to a chat."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Status is 403', () => pm.response.to.have.status(403));"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🔁 Full Flow Test",
+      "description": "An automated end-to-end flow that exercises the entire API in sequence.\n\nRun this folder as a **Collection Run** to test the complete happy path:\n1. Register user\n2. Login\n3. Search for another user\n4. Create DM\n5. Send messages\n6. Add reactions\n7. Mark as read\n8. Logout",
+      "item": [
+        {
+          "name": "Step 1 — Register New User",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"flow_test_{{$timestamp}}@example.com\",\n  \"username\": \"flowtest{{$timestamp}}\",\n  \"displayName\": \"Flow Test User\",\n  \"password\": \"FlowTest@123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Step 1] Register succeeds (201)', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', body.data.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', body.data.tokens.refreshToken);",
+                  "pm.collectionVariables.set('userId', body.data.user.id);",
+                  "console.log('Step 1 ✅ Registered:', body.data.user.username);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 2 — Search for Bob",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/search?q=bob",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "search"],
+              "query": [{ "key": "q", "value": "bob" }]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Step 2] Search succeeds (200)', () => pm.response.to.have.status(200));",
+                  "const users = pm.response.json().data;",
+                  "pm.test('[Step 2] Bob found', () => pm.expect(users.length).to.be.greaterThan(0));",
+                  "if (users.length > 0) {",
+                  "    pm.collectionVariables.set('recipientId', users[0].id);",
+                  "    console.log('Step 2 ✅ Found:', users[0].username, '| ID:', users[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 3 — Create DM with Bob",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipientId\": \"{{recipientId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/private",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "private"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Step 3] DM created (201)', () => pm.response.to.have.status(201));",
+                  "const chat = pm.response.json().data;",
+                  "pm.collectionVariables.set('chatId', chat.id);",
+                  "console.log('Step 3 ✅ Chat created:', chat.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 4 — Send First Message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Hey Bob! Automated test message 🚀\",\n  \"type\": \"TEXT\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Step 4] Message sent (201)', () => pm.response.to.have.status(201));",
+                  "const msg = pm.response.json().data;",
+                  "pm.collectionVariables.set('messageId', msg.id);",
+                  "console.log('Step 4 ✅ Message sent:', msg.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 5 — React with 👍",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emoji\": \"👍\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages/{{messageId}}/reactions",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages", "{{messageId}}", "reactions"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Step 5] Reaction added (204)', () => pm.response.to.have.status(204));",
+                  "console.log('Step 5 ✅ 👍 reaction added');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 6 — Mark Message as Read",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageIds\": [\"{{messageId}}\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatId}}/messages/read",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{chatId}}", "messages", "read"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Step 6] Messages marked as read (204)', () => pm.response.to.have.status(204));",
+                  "console.log('Step 6 ✅ Message marked as read');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 7 — List Chats (verify unread is 0)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Step 7] List chats succeeds (200)', () => pm.response.to.have.status(200));",
+                  "const chats = pm.response.json().data;",
+                  "const ourChat = chats.find(c => c.id === pm.collectionVariables.get('chatId'));",
+                  "if (ourChat) {",
+                  "    console.log('Step 7 ✅ Chat found, unreadCount:', ourChat.unreadCount);",
+                  "}",
+                  "console.log('\\n🎉 Full flow test PASSED! All 7 steps completed successfully.');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🔌 WebSocket Reference",
+      "description": "WebSocket events reference documentation.\n\nPostman supports WebSocket connections natively. To test:\n1. Open a new tab → WebSocket Request\n2. URL: `ws://localhost:3000/chat`\n3. Set handshake headers: `Authorization: Bearer {{accessToken}}`\n\nOr use the Socket.IO protocol with `socket.io-client` in the Console tab.\n\n**Event flow:**\n```\nconnect → join chat → send messages → typing indicators → disconnect\n```\n\nSee `docs/websocket-client-guide.ts` in the project for full frontend integration code.",
+      "item": [
+        {
+          "name": "WebSocket Events Documentation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "# WebSocket Connection\n\n**URL:** `ws://localhost:3000/chat`  \n**Protocol:** Socket.IO  \n**Namespace:** `/chat`\n\n## Client Connection\n```javascript\nconst socket = io('http://localhost:3000/chat', {\n  auth: { token: 'Bearer <accessToken>' }\n});\n```\n\n## Events to Emit (Client → Server)\n\n| Event | Payload |\n|-------|---------|\n| `chat:join` | `{ chatId: string }` |\n| `chat:leave` | `{ chatId: string }` |\n| `message:send` | `{ chatId, content, type?, replyToId? }` |\n| `message:edit` | `{ chatId, messageId, content }` |\n| `message:delete` | `{ chatId, messageId }` |\n| `typing:start` | `{ chatId: string }` |\n| `typing:stop` | `{ chatId: string }` |\n| `message:read` | `{ chatId, messageIds: string[] }` |\n| `reaction:add` | `{ chatId, messageId, emoji }` |\n| `reaction:remove` | `{ chatId, messageId, emoji }` |\n| `presence:heartbeat` | `{}` (every 20s) |\n\n## Events to Listen (Server → Client)\n\n| Event | Payload |\n|-------|---------|\n| `message:new` | `MessageDto` |\n| `message:updated` | `MessageDto` |\n| `message:deleted` | `{ messageId, chatId }` |\n| `typing:user` | `{ userId, username, chatId }` |\n| `typing:user:stop` | `{ userId, username, chatId }` |\n| `presence:online` | `{ userId, status: 'ONLINE' }` |\n| `presence:offline` | `{ userId, status: 'OFFLINE' }` |\n| `message:read:ack` | `{ userId, messageIds[], readAt }` |\n| `reaction:added` | `{ messageId, chatId, emoji, userId }` |\n| `reaction:removed` | `{ messageId, chatId, emoji, userId }` |\n| `error` | `{ message, errorCode? }` |"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+# ============================================================================
+# docker-compose.yml — Local Development Stack
+# ============================================================================
+#
+# Services:
+#   - api:       NestJS application (hot reload in dev)
+#   - postgres:  PostgreSQL database
+#   - redis:     Redis for sessions, pub/sub, caching
+#   - pgadmin:   Database GUI (dev only)
+#   - redis-commander: Redis GUI (dev only)
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose up -d api      # Start only the API
+#   docker compose logs -f api    # Follow API logs
+#   docker compose exec api sh    # Shell into API container
+# ============================================================================
+
+version: '3.9'
+
+services:
+  # ─── NestJS API ─────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder # Use builder stage for dev (has TypeScript)
+    container_name: chat-api
+    restart: unless-stopped
+    ports:
+      - '${PORT:-3000}:3000'
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-chatuser}:${POSTGRES_PASSWORD:-chatpassword}@postgres:5432/${POSTGRES_DB:-chatdb}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redispassword}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-minimum-32-characters}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-minimum-32-characters}
+      JWT_ACCESS_EXPIRATION: 15m
+      JWT_REFRESH_EXPIRATION: 7d
+      CORS_ORIGIN: http://localhost:3001,http://localhost:4200
+      THROTTLE_TTL: 60000
+      THROTTLE_LIMIT: 100
+      LOG_LEVEL: debug
+    volumes:
+      - ./src:/app/src # Hot reload: mount source into container
+      - ./prisma:/app/prisma
+      - uploads_data:/app/uploads
+    command: npm run start:dev # ts-node with file watching
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - chat-network
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: chat-postgres
+    restart: unless-stopped
+    ports:
+      - '5437:5432'
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chatuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-chatdb}
+      # Performance tuning for development
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - chat-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-chatuser} -d ${POSTGRES_DB:-chatdb}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: chat-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-redispassword}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    networks:
+      - chat-network
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-redispassword}', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── PgAdmin (Dev Only) ───────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: chat-pgadmin
+    restart: unless-stopped
+    ports:
+      - '5050:80'
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@chat.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - chat-network
+    profiles:
+      - tools # Only starts with: docker compose --profile tools up
+
+  # ─── Redis Commander (Dev Only) ───────────────────────────────────────────────
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: chat-redis-commander
+    restart: unless-stopped
+    ports:
+      - '8081:8081'
+    environment:
+      REDIS_HOSTS: 'local:redis:6379:0:${REDIS_PASSWORD:-redispassword}'
+    depends_on:
+      - redis
+    networks:
+      - chat-network
+    profiles:
+      - tools
+
+# ─── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  chat-network:
+    driver: bridge
+    name: chat-network
+
+# ─── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    name: chat-postgres-data
+  redis_data:
+    name: chat-redis-data
+  pgadmin_data:
+    name: chat-pgadmin-data
+  uploads_data:
+    name: chat-uploads-data

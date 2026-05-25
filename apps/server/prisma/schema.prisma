@@ -1,0 +1,237 @@
+// prisma/schema.prisma
+// ============================================================================
+// PRISMA SCHEMA — Enterprise Chat API
+// ============================================================================
+// Every model is designed with:
+//   - Soft delete (deletedAt) where data retention matters
+//   - Proper indexes for query performance
+//   - Enum types for type safety at DB level
+//   - Cascade rules that make business sense
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+enum ChatType {
+  PRIVATE   // 1-on-1 DM
+  GROUP     // Multi-user room
+  CHANNEL   // Broadcast channel (admin posts only)
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  SYSTEM   // e.g. "User joined", "User left"
+}
+
+enum PresenceStatus {
+  ONLINE
+  AWAY
+  BUSY
+  OFFLINE
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id             String         @id @default(uuid())
+  email          String         @unique
+  username       String         @unique
+  displayName    String
+  passwordHash   String
+  avatarUrl      String?
+  bio            String?
+  role           Role           @default(USER)
+  presenceStatus PresenceStatus @default(OFFLINE)
+  lastSeenAt     DateTime?
+  emailVerified  Boolean        @default(false)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?      // Soft delete
+
+  // Relations
+  refreshTokens  RefreshToken[]
+  chatMembers    ChatMember[]
+  sentMessages   Message[]      @relation("SentMessages")
+  messageReads   MessageRead[]
+  reactions      Reaction[]
+
+  @@index([email])
+  @@index([username])
+  @@index([presenceStatus])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH — REFRESH TOKENS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id          String    @id @default(uuid())
+  token       String    @unique  // Stored as hashed value
+  userId      String
+  userAgent   String?
+  ipAddress   String?
+  expiresAt   DateTime
+  revokedAt   DateTime?          // Null = still valid; set to revoke
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHATS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Chat {
+  id          String     @id @default(uuid())
+  name        String?    // Null for PRIVATE chats
+  description String?
+  type        ChatType   @default(PRIVATE)
+  avatarUrl   String?
+  isArchived  Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  // Relations
+  members     ChatMember[]
+  messages    Message[]
+
+  @@index([type])
+  @@index([deletedAt])
+  @@map("chats")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT MEMBERS — Join table with role metadata
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ChatMember {
+  id             String     @id @default(uuid())
+  chatId         String
+  userId         String
+  role           MemberRole @default(MEMBER)
+  lastReadAt     DateTime?  // For unread count calculation
+  notifyMuted    Boolean    @default(false)
+  joinedAt       DateTime   @default(now())
+  leftAt         DateTime?  // Null = still in chat
+
+  // Relations
+  chat           Chat       @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])  // One record per user-chat pair
+  @@index([userId])
+  @@index([chatId])
+  @@index([lastReadAt])
+  @@map("chat_members")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MESSAGES
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Message {
+  id          String      @id @default(uuid())
+  chatId      String
+  senderId    String
+  content     String?
+  type        MessageType @default(TEXT)
+  mediaUrl    String?     // For IMAGE/FILE types
+  mediaMeta   Json?       // Flexible metadata: { size, mimeType, filename }
+  replyToId   String?     // Self-reference for threaded replies
+  editedAt    DateTime?   // Non-null = was edited
+  isPinned    Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?   // Soft delete — preserve read receipts
+
+  // Relations
+  chat        Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender      User        @relation("SentMessages", fields: [senderId], references: [id])
+  replyTo     Message?    @relation("Replies", fields: [replyToId], references: [id])
+  replies     Message[]   @relation("Replies")
+  reads       MessageRead[]
+  reactions   Reaction[]
+
+  @@index([chatId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@index([chatId, createdAt])  // Composite for pagination queries
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MESSAGE READS — Delivery + Read receipts
+// ─────────────────────────────────────────────────────────────────────────────
+
+model MessageRead {
+  id          String    @id @default(uuid())
+  messageId   String
+  userId      String
+  readAt      DateTime  @default(now())
+
+  // Relations
+  message     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])  // A user reads a message exactly once
+  @@index([messageId])
+  @@index([userId])
+  @@map("message_reads")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REACTIONS — Emoji reactions on messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Reaction {
+  id          String    @id @default(uuid())
+  messageId   String
+  userId      String
+  emoji       String    // Unicode emoji string e.g. "👍"
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  message     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])  // One emoji per user per message
+  @@index([messageId])
+  @@map("reactions")
+}
