@@ -30,6 +30,8 @@ import { HttpAdapterHost } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import * as compression from 'compression'
 import helmet from 'helmet'
+import { Request, Response } from 'express'
+import { join } from 'path'
 import { AppModule } from './app.module'
 import { AppLogger } from './logger/logger.service'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'
@@ -154,9 +156,18 @@ except \`/auth/register\` and \`/auth/login\`.
       .addTag('Chats', 'Chat rooms and DMs')
       .addTag('Messages', 'Message CRUD and reactions')
       .build()
+    const expressApp = app.getHttpAdapter().getInstance()
+    expressApp.get(
+      `/${apiPrefix}/docs/postman-collection.json`,
+      (_req: Request, res: Response) => {
+        res.sendFile(join(process.cwd(), 'postman-collection.json'))
+      }
+    )
 
     const document = SwaggerModule.createDocument(app, swaggerConfig)
     SwaggerModule.setup(`${apiPrefix}/docs`, app, document, {
+      jsonDocumentUrl: `${apiPrefix}/docs/openapi.json`,
+      yamlDocumentUrl: `${apiPrefix}/docs/openapi.yaml`,
       swaggerOptions: {
         persistAuthorization: true, // Don't lose token on page refresh
         displayRequestDuration: true,
@@ -168,6 +179,11 @@ except \`/auth/register\` and \`/auth/login\`.
     })
 
     logger.log(`Swagger docs: http://localhost:${port}/${apiPrefix}/docs`, 'Bootstrap')
+    logger.log(`OpenAPI JSON: http://localhost:${port}/${apiPrefix}/docs/openapi.json`, 'Bootstrap')
+    logger.log(
+      `Postman collection: http://localhost:${port}/${apiPrefix}/docs/postman-collection.json`,
+      'Bootstrap'
+    )
   }
 
   // ── Start Server ──────────────────────────────────────────────────────────

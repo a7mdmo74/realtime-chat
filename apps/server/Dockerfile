@@ -65,6 +65,7 @@ USER node
 # Copy production dependencies (re-install without devDeps for smaller image)
 COPY --chown=node:node package*.json ./
 RUN npm ci --only=production && npm cache clean --force
+COPY --chown=node:node postman-collection.json ./postman-collection.json
 
 # Copy compiled output and Prisma artifacts from builder
 COPY --chown=node:node --from=builder /app/dist ./dist

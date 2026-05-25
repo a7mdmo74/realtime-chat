@@ -44,7 +44,7 @@
 ## 📁 Folder Structure — Every Folder Explained
 
 ```
-realtime-chat-api/
+server/
 │
 ├── src/
 │   │
@@ -144,6 +144,7 @@ realtime-chat-api/
 ## ⚡ Quick Start (Local Development)
 
 ### Prerequisites
+
 - Node.js 20+
 - Docker & Docker Compose
 - npm
@@ -152,7 +153,7 @@ realtime-chat-api/
 
 ```bash
 git clone <your-repo>
-cd realtime-chat-api
+cd server
 npm install
 ```
 
@@ -167,6 +168,7 @@ cp .env.example .env
 ```
 
 Generate secure secrets:
+
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
@@ -279,11 +281,13 @@ readinessProbe:
 ### Horizontal Scaling
 
 The API is stateless — scale to any number of instances:
+
 ```bash
 docker compose up -d --scale api=3
 ```
 
 WebSocket scaling works via Redis pub/sub:
+
 - User on Instance A sends a message
 - Instance A publishes to Redis channel `chat.message:{chatId}`
 - Instances B and C subscribe and forward to their connected clients
@@ -294,49 +298,51 @@ WebSocket scaling works via Redis pub/sub:
 ## 🔌 WebSocket Events Reference
 
 ### Connection
+
 ```javascript
 const socket = io('http://localhost:3000/chat', {
-  auth: { token: 'Bearer <access_token>' }
-});
+  auth: { token: 'Bearer <access_token>' },
+})
 ```
 
 ### Client → Server Events
 
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `chat:join` | `{ chatId }` | Join a chat room |
-| `chat:leave` | `{ chatId }` | Leave a chat room |
-| `message:send` | `{ chatId, content, type?, replyToId? }` | Send message |
-| `message:edit` | `{ chatId, messageId, content }` | Edit message |
-| `message:delete` | `{ chatId, messageId }` | Delete message |
-| `typing:start` | `{ chatId }` | Start typing indicator |
-| `typing:stop` | `{ chatId }` | Stop typing indicator |
-| `message:read` | `{ chatId, messageIds[] }` | Mark messages read |
-| `reaction:add` | `{ chatId, messageId, emoji }` | Add reaction |
-| `reaction:remove` | `{ chatId, messageId, emoji }` | Remove reaction |
-| `presence:heartbeat` | `{}` | Keep-alive (every 20s) |
+| Event                | Payload                                  | Description            |
+| -------------------- | ---------------------------------------- | ---------------------- |
+| `chat:join`          | `{ chatId }`                             | Join a chat room       |
+| `chat:leave`         | `{ chatId }`                             | Leave a chat room      |
+| `message:send`       | `{ chatId, content, type?, replyToId? }` | Send message           |
+| `message:edit`       | `{ chatId, messageId, content }`         | Edit message           |
+| `message:delete`     | `{ chatId, messageId }`                  | Delete message         |
+| `typing:start`       | `{ chatId }`                             | Start typing indicator |
+| `typing:stop`        | `{ chatId }`                             | Stop typing indicator  |
+| `message:read`       | `{ chatId, messageIds[] }`               | Mark messages read     |
+| `reaction:add`       | `{ chatId, messageId, emoji }`           | Add reaction           |
+| `reaction:remove`    | `{ chatId, messageId, emoji }`           | Remove reaction        |
+| `presence:heartbeat` | `{}`                                     | Keep-alive (every 20s) |
 
 ### Server → Client Events
 
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `message:new` | `MessageDto` | New message in room |
-| `message:updated` | `MessageDto` | Message was edited |
-| `message:deleted` | `{ messageId, chatId }` | Message was deleted |
-| `typing:user` | `{ userId, username, chatId }` | User is typing |
-| `typing:user:stop` | `{ userId, username, chatId }` | User stopped typing |
-| `presence:online` | `{ userId, status }` | User came online |
-| `presence:offline` | `{ userId, status }` | User went offline |
-| `message:read:ack` | `{ userId, messageIds[], readAt }` | Messages were read |
-| `reaction:added` | `{ messageId, chatId, emoji, userId }` | Reaction added |
-| `reaction:removed` | `{ messageId, chatId, emoji, userId }` | Reaction removed |
-| `error` | `{ message, errorCode? }` | Error event |
+| Event              | Payload                                | Description         |
+| ------------------ | -------------------------------------- | ------------------- |
+| `message:new`      | `MessageDto`                           | New message in room |
+| `message:updated`  | `MessageDto`                           | Message was edited  |
+| `message:deleted`  | `{ messageId, chatId }`                | Message was deleted |
+| `typing:user`      | `{ userId, username, chatId }`         | User is typing      |
+| `typing:user:stop` | `{ userId, username, chatId }`         | User stopped typing |
+| `presence:online`  | `{ userId, status }`                   | User came online    |
+| `presence:offline` | `{ userId, status }`                   | User went offline   |
+| `message:read:ack` | `{ userId, messageIds[], readAt }`     | Messages were read  |
+| `reaction:added`   | `{ messageId, chatId, emoji, userId }` | Reaction added      |
+| `reaction:removed` | `{ messageId, chatId, emoji, userId }` | Reaction removed    |
+| `error`            | `{ message, errorCode? }`              | Error event         |
 
 ---
 
 ## 🔒 Security Architecture
 
 ### Authentication Flow
+
 ```
 Register/Login
     │
@@ -355,6 +361,7 @@ Access token expires → POST /auth/refresh
 ```
 
 ### Security Measures
+
 - **bcrypt cost factor 12** — thwarts GPU brute force
 - **Refresh token hashing** — DB breach doesn't expose tokens
 - **Token rotation** — each refresh use invalidates the old token
@@ -386,6 +393,7 @@ npm run test:watch
 ```
 
 ### Testing Strategy
+
 - **Unit**: Service methods in isolation with typed mocks
 - **E2E**: Full HTTP stack against real test database
 - **WebSocket**: Use `socket.io-client` to test gateway events
@@ -397,28 +405,33 @@ npm run test:watch
 After starting the server, Swagger UI is at:
 **http://localhost:3000/api/docs**
 
+- OpenAPI JSON: **http://localhost:3000/api/docs/openapi.json**
+- OpenAPI YAML: **http://localhost:3000/api/docs/openapi.yaml**
+- Postman Collection: **http://localhost:3000/api/docs/postman-collection.json**
+- Docs UI app (monorepo): **http://localhost:3001**
+
 ### Key Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/auth/register` | Register new user |
-| POST | `/api/v1/auth/login` | Login |
-| POST | `/api/v1/auth/refresh` | Refresh tokens |
-| POST | `/api/v1/auth/logout` | Logout |
-| GET | `/api/v1/users/me` | Current user profile |
-| PATCH | `/api/v1/users/me` | Update profile |
-| GET | `/api/v1/users/search?q=` | Search users |
-| POST | `/api/v1/chats/private` | Start/get DM |
-| POST | `/api/v1/chats/group` | Create group chat |
-| GET | `/api/v1/chats` | List my chats |
-| GET | `/api/v1/chats/:id` | Get chat details |
-| POST | `/api/v1/chats/:id/messages` | Send message |
-| GET | `/api/v1/chats/:id/messages` | Get messages (paginated) |
-| PATCH | `/api/v1/chats/:chatId/messages/:id` | Edit message |
-| DELETE | `/api/v1/chats/:chatId/messages/:id` | Delete message |
-| POST | `/api/v1/chats/:chatId/messages/:id/reactions` | Add reaction |
-| GET | `/health` | Liveness probe |
-| GET | `/ready` | Readiness probe |
+| Method | Path                                           | Description              |
+| ------ | ---------------------------------------------- | ------------------------ |
+| POST   | `/api/v1/auth/register`                        | Register new user        |
+| POST   | `/api/v1/auth/login`                           | Login                    |
+| POST   | `/api/v1/auth/refresh`                         | Refresh tokens           |
+| POST   | `/api/v1/auth/logout`                          | Logout                   |
+| GET    | `/api/v1/users/me`                             | Current user profile     |
+| PATCH  | `/api/v1/users/me`                             | Update profile           |
+| GET    | `/api/v1/users/search?q=`                      | Search users             |
+| POST   | `/api/v1/chats/private`                        | Start/get DM             |
+| POST   | `/api/v1/chats/group`                          | Create group chat        |
+| GET    | `/api/v1/chats`                                | List my chats            |
+| GET    | `/api/v1/chats/:id`                            | Get chat details         |
+| POST   | `/api/v1/chats/:id/messages`                   | Send message             |
+| GET    | `/api/v1/chats/:id/messages`                   | Get messages (paginated) |
+| PATCH  | `/api/v1/chats/:chatId/messages/:id`           | Edit message             |
+| DELETE | `/api/v1/chats/:chatId/messages/:id`           | Delete message           |
+| POST   | `/api/v1/chats/:chatId/messages/:id/reactions` | Add reaction             |
+| GET    | `/health`                                      | Liveness probe           |
+| GET    | `/ready`                                       | Readiness probe          |
 
 ---
 
@@ -445,18 +458,18 @@ npm run prisma:seed
 
 ## 🏗️ Senior-Level Patterns Used
 
-| Pattern | Location | Why |
-|---------|----------|-----|
-| **Fail Fast** | `env.validation.ts` | App refuses to start with bad config |
-| **Secure by Default** | `app.module.ts` | JWT guard global, @Public() to opt out |
-| **Cache-Aside** | `users.service.ts` | Redis cache, invalidate on write |
-| **Token Rotation** | `auth.service.ts` | Stolen token detection |
-| **Soft Deletes** | Prisma schema | Data preservation, reversible |
-| **Cursor Pagination** | `messages.service.ts` | Stable under real-time inserts |
-| **Redis Pub/Sub** | `chat.gateway.ts` | Horizontal WS scaling |
-| **Config Abstraction** | `app.config.ts` | Typed, testable, single source of truth |
-| **Global Error Shape** | `all-exceptions.filter.ts` | Consistent API contract |
-| **Health Probes** | `health.controller.ts` | K8s liveness/readiness |
-| **Graceful Shutdown** | `main.ts` + `prisma.service.ts` | Zero-downtime deploys |
-| **Non-root Container** | `Dockerfile` | Container security |
-| **Multi-stage Build** | `Dockerfile` | ~200MB production image |
+| Pattern                | Location                        | Why                                     |
+| ---------------------- | ------------------------------- | --------------------------------------- |
+| **Fail Fast**          | `env.validation.ts`             | App refuses to start with bad config    |
+| **Secure by Default**  | `app.module.ts`                 | JWT guard global, @Public() to opt out  |
+| **Cache-Aside**        | `users.service.ts`              | Redis cache, invalidate on write        |
+| **Token Rotation**     | `auth.service.ts`               | Stolen token detection                  |
+| **Soft Deletes**       | Prisma schema                   | Data preservation, reversible           |
+| **Cursor Pagination**  | `messages.service.ts`           | Stable under real-time inserts          |
+| **Redis Pub/Sub**      | `chat.gateway.ts`               | Horizontal WS scaling                   |
+| **Config Abstraction** | `app.config.ts`                 | Typed, testable, single source of truth |
+| **Global Error Shape** | `all-exceptions.filter.ts`      | Consistent API contract                 |
+| **Health Probes**      | `health.controller.ts`          | K8s liveness/readiness                  |
+| **Graceful Shutdown**  | `main.ts` + `prisma.service.ts` | Zero-downtime deploys                   |
+| **Non-root Container** | `Dockerfile`                    | Container security                      |
+| **Multi-stage Build**  | `Dockerfile`                    | ~200MB production image                 |
